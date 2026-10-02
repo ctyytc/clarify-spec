@@ -2,54 +2,61 @@
 
 [![ci](https://github.com/ctyytc/clarify-spec/actions/workflows/ci.yml/badge.svg)](https://github.com/ctyytc/clarify-spec/actions/workflows/ci.yml)
 
-本 Skill 面向 Vibe Coding 的三类文本：人类表达、Multi-Agent 过程文件与 Agent 运行时消息。目标是对它们进行消歧与规范化。
-A skill for **disambiguating and standardizing** human expression, multi-agent process artifacts, and runtime agent messages during Vibe Coding. Bilingual (中文/EN). Ships two deterministic linters as the executable spec.
+本仓库提供两个互补的 Skill，按**信道**拆分 Vibe Coding 的消歧规范。`clarify-spec` 面向人向 Agent 下达的文本。`clarify-runtime` 面向 Agent 之间传递的指令与运行时消息。与人交互的 Agent 只需安装前者，不加载 A2A 规则。
+Two complementary skills for **disambiguating and standardizing** Vibe Coding texts, split by channel: `clarify-spec` for human-to-agent expression, `clarify-runtime` for agent-to-agent instructions and runtime messages. Bilingual (中文/EN). Ships deterministic linters as the executable spec.
 
-> 灵感来源 [asd-ste100-skill][ref-ste]。它把航空维修英语的受控语言纪律移植给 Agent 读者。本项目将其扩展为**中英双语**，并补充**过程文件架构规范**、**运行时消息契约**与**两个确定性 linter**。
+> 灵感来源 [asd-ste100-skill][ref-ste]。它把航空维修英语的受控语言纪律移植给 Agent 读者。本项目将其扩展为**中英双语**，并补充**过程文件架构规范**、**运行时消息契约**与**确定性 linter**。
 
 ## 问题 / The Problem
 
-Vibe Coding 中，三类文本在人与 Agent、Agent 与 Agent 之间传递时产生二义性，而接收方无法追问：
+Vibe Coding 中，文本在两条信道上传递时产生二义性，而接收方无法追问：
 
-1. **人类表达**：需求陈述、意图描述、验收标准。典型失效：强度漂移（必须/应当/最好混用）。其他失效：验收无量化、一句多义、模糊量词、营销词。
-2. **Multi-Agent 过程文件**：PLAN、交接单、ADR、记忆文件、状态报告。典型失效：缺文件头契约、交接三段不全、决策无理由无备选。
-3. **Agent 运行时消息**：A2A 消息体、工具调用与返回、错误事件。典型失效：无信封与关联、意图自由文本、错误只写在自然语言里。
+1. **人 → Agent**（`clarify-spec`）：需求陈述、意图描述、验收标准。典型失效：强度漂移（必须/应当/最好混用）、验收无量化、一句多义、模糊量词、营销词。过程文件（PLAN、交接单、ADR、记忆文件、状态报告）同在此信道：它们由 Agent 撰写、由人评审。
+2. **Agent → Agent**（`clarify-runtime`）：主 Agent 向 sub agent 或编排层派发的自然语言指令。还包括 A2A 消息体、工具调用与返回、错误事件。典型失效：无信封与关联、意图自由文本、错误只写在自然语言里、相对时间。
 
-Three text kinds circulate between humans and agents with no back-channel. Ambiguity in either is expensive: requirements drift in strength, handoffs omit what the next agent needs, and runtime errors get executed instead of read.
+Ambiguity in either channel is expensive: requirements drift in strength, handoffs omit what the next agent needs, and runtime errors get executed instead of read.
 
 ## 设计：三个软件工程维度 / Design: Three SE Dimensions
 
 | 维度 | 设计决策 | 依据 |
 |---|---|---|
-| **交互** | 触发契约（双语触发词）；输入分类（A/B/C 三类）；双模式；输出契约——默认只返回结果，请求时附规则表 | RFC 2119；Diátaxis |
-| **架构** | 三层渐进披露；规则、模板、脚本三者分离；散文 linter 与消息 linter 分离；规则条目编号可追溯 | GB/T 8567；Nygard ADR；arc42 |
-| **性能** | SKILL.md < 500 行；机械规则交 stdlib linter（可进 CI）；`--baseline` 渐进采用；大负载外置（C-11）；改写保精度与情态 | ISO/IEC 25010 / GB/T 25000；SemVer |
+| **交互** | 按信道拆分为两个 Skill；触发契约（双语触发词）；双姿态（预检/校验只报告不静默改写，改写/构造只输出结果）；双模式；输出契约 | RFC 2119；Diátaxis |
+| **架构** | 三层渐进披露；规则、模板、脚本三者分离；散文 linter 与消息 linter 分离。规则条目编号可追溯；跨 Skill 复制文件由 CI 一致性门禁锁定 | GB/T 8567；Nygard ADR；arc42 |
+| **性能** | 每个 SKILL.md < 500 行；机械规则交 stdlib linter（可进 CI）；`--baseline` 渐进采用；大负载外置（C-11）；改写保精度与情态 | ISO/IEC 25010 / GB/T 25000；SemVer |
 
 ## 仓库结构 / Repository Structure
 
 ```
 clarify-spec/
-├── SKILL.md                        # 核心工作流与输出契约（<500 行）
-├── references/
-│   ├── human-expression-rules.md   # A 类：人类表达规则全文（H-A1…H-A14, R-A1）
-│   ├── agent-artifacts-rules.md    # B 类：过程文件规则全文（H-B1…H-B18）
-│   ├── runtime-message-rules.md    # C 类：运行时消息规则全文（C-1…C-12）
-│   ├── protocol-mapping.md         # C 类字段与 A2A / MCP 的逐字段映射
-│   ├── standards-map.md            # 中英经典标准映射总表
-│   └── templates.md                # PLAN / HANDOFF / ADR / STATUS 最小模板
-├── scripts/
-│   ├── clarify_config.py             # 项目级配置加载（受限 YAML，单一事实源）
-│   ├── spec-lint.py                  # 散文与过程文件 linter（纯 stdlib）
-│   └── msg-lint.py                   # 运行时消息契约 linter（含 --profile 协议适配）
-├── tests/
-│   └── fixtures/                     # CI 正负夹具（independent / a2a 两套）
-│       └── config/                   # 项目级配置夹具（extend.yml 及配套文档）
-├── .github/workflows/ci.yml        # 双 linter 自检 + 零违规门禁 + 负向测试
-└── examples/
-    ├── before-after.md             # 中英对照改写示例
-    ├── runtime-messages.md         # 运行时消息改写示例
-    └── linter-edge-cases.md        # 边界测试夹具
+├── skills/
+│   ├── clarify-spec/                 # Skill 1：人 → Agent 信道（A 类表达 + B 类过程文件）
+│   │   ├── SKILL.md                  # 预检与改写两个姿态；输出契约（<500 行）
+│   │   ├── references/
+│   │   │   ├── human-expression-rules.md   # A 类规则全文（H-A1…H-A14, R-A1）
+│   │   │   ├── agent-artifacts-rules.md    # B 类规则全文（H-B1…H-B18）
+│   │   │   ├── standards-map.md            # 中英经典标准映射总表
+│   │   │   └── templates.md                # PLAN / HANDOFF / ADR / STATUS 最小模板
+│   │   ├── scripts/
+│   │   │   ├── clarify_config.py           # 项目级配置加载（受限 YAML，单一事实源）
+│   │   │   └── spec-lint.py                # 散文与过程文件 linter（纯 stdlib）
+│   │   ├── examples/                       # 中英对照改写示例 + 边界测试夹具
+│   │   └── tests/fixtures/config/          # 项目级配置夹具
+│   └── clarify-runtime/              # Skill 2：Agent → Agent 信道（派发指令 + C 类运行时消息）
+│       ├── SKILL.md                  # 接收侧旁路校验与发起侧构造两个姿态（<500 行）
+│       ├── references/
+│       │   ├── runtime-message-rules.md    # C 类规则全文（C-1…C-12）
+│       │   ├── protocol-mapping.md         # C 类字段与 A2A / MCP 的逐字段映射
+│       │   └── human-expression-rules.md   # 派发指令适用的表达规则（与 Skill 1 同源）
+│       ├── scripts/
+│       │   ├── msg-lint.py                 # 运行时消息契约 linter（含 --profile 协议适配）
+│       │   ├── spec-lint.py                # 派发指令 linter（与 Skill 1 同源）
+│       │   └── clarify_config.py           # 与 Skill 1 同源
+│       ├── examples/runtime-messages.md    # 运行时消息改写示例
+│       └── tests/fixtures/                 # 消息契约夹具（independent / a2a 两套）
+└── .github/workflows/ci.yml          # 双 Skill 自检 + 零违规门禁 + 负向测试 + 复制件一致性门禁
 ```
+
+标注「同源」的文件在两个 Skill 中各持有一份副本，保证每个 Skill 自包含；CI 的 `diff` 门禁强制副本逐字节一致，防止漂移。
 
 ## 安装 / Installation
 
@@ -57,27 +64,30 @@ clarify-spec/
 
 ```
 git clone https://github.com/ctyytc/clarify-spec.git
-cp -r clarify-spec ~/.config/agents/skills/clarify-spec   # 用户级
-# 或项目级：cp -r clarify-spec <project>/.agents/skills/clarify-spec
+# 与人交互的 Agent：
+cp -r clarify-spec/skills/clarify-spec ~/.config/agents/skills/clarify-spec
+# 多 Agent 编排 / 运行时环境（按需两个都装）：
+cp -r clarify-spec/skills/clarify-runtime ~/.config/agents/skills/clarify-runtime
+# 项目级：cp -r clarify-spec/skills/<name> <project>/.agents/skills/<name>
 ```
 
 ### 直接使用 linter
 
-两个 linter 均无依赖，任何 Python 3.8+ 环境可直接运行：
+所有 linter 均无依赖，任何 Python 3.8+ 环境可直接运行：
 
 ```bash
-# spec-lint：散文与过程文件
-python3 scripts/spec-lint.py docs/                 # 扫描目录（.md/.txt）
-python3 scripts/spec-lint.py --json FILE           # CI 结构化输出
-python3 scripts/spec-lint.py --baseline 10 docs/   # 存量文档渐进采用
-python3 scripts/spec-lint.py --kind handoff HANDOFF.md  # B 类文件头契约检查
-python3 scripts/spec-lint.py --selftest            # 内置自检
+# spec-lint：散文、过程文件与派发指令（两个 Skill 各有一份，行为一致）
+python3 skills/clarify-spec/scripts/spec-lint.py docs/                 # 扫描目录（.md/.txt）
+python3 skills/clarify-spec/scripts/spec-lint.py --json FILE           # CI 结构化输出
+python3 skills/clarify-spec/scripts/spec-lint.py --baseline 10 docs/   # 存量文档渐进采用
+python3 skills/clarify-spec/scripts/spec-lint.py --kind handoff HANDOFF.md  # B 类文件头契约检查
+python3 skills/clarify-spec/scripts/spec-lint.py --selftest            # 内置自检
 
 # msg-lint：JSON 运行时消息
-python3 scripts/msg-lint.py msg.json               # 单条消息契约检查
-python3 scripts/msg-lint.py --json msgs/           # 目录批量 + CI 输出
-python3 scripts/msg-lint.py --profile a2a msg.json # A2A 协议适配（另有 mcp-request / mcp-result）
-python3 scripts/msg-lint.py --selftest             # 内置自检
+python3 skills/clarify-runtime/scripts/msg-lint.py msg.json               # 单条消息契约检查
+python3 skills/clarify-runtime/scripts/msg-lint.py --json msgs/           # 目录批量 + CI 输出
+python3 skills/clarify-runtime/scripts/msg-lint.py --profile a2a msg.json # A2A 协议适配（另有 mcp-request / mcp-result）
+python3 skills/clarify-runtime/scripts/msg-lint.py --selftest             # 内置自检
 ```
 
 退出码契约（两个 linter 一致）：硬性违规数 > `--baseline`（默认 0）时 exit 1；建议性发现永不导致失败。配置损坏（`--config` 文件语法或语义非法）时 exit 2 —— fail-loud，绝不静默回退内置默认。
@@ -113,19 +123,27 @@ Project-level configuration: drop a `.clarify-spec.yml` at the project root to e
 
 ## 使用 / Usage
 
-对 Agent 说：
+对与人交互的 Agent 说（`clarify-spec`）：
 
 ```
+检查这条指令有没有歧义     / pre-flight check this instruction
 消歧这份需求陈述           / disambiguate this requirement
 规范这段表达              / standardize this text
 审查这份交接单            / review this handoff doc
 改写这条验收标准          / rewrite this acceptance criterion
 检查这份 PLAN / ADR       / check this PLAN / ADR
+```
+
+对编排层或接收侧 Agent 说（`clarify-runtime`）：
+
+```
+校验收到的这条指令         / validate this incoming instruction
+派发任务前自检            / pre-flight check before delegation
 检查这条 A2A 消息         / review this A2A message
 规范这个工具调用          / standardize this tool call
 ```
 
-默认只返回改写后的文本或消息体。要求「show the diff / 改了哪些」时返回规则对照表。
+预检与校验姿态只报告违规与建议，绝不静默改写他人指令。改写与构造姿态默认只返回结果本身；要求「show the diff / 改了哪些」时返回规则对照表。
 
 ## 标准依据 / Standards
 
@@ -133,7 +151,7 @@ Project-level configuration: drop a `.clarify-spec.yml` at the project root to e
 
 **中文标准**：GB/T 8567-2006、GB/T 8566-2007。以及 GB/T 9385、GB/T 25000.10、GB/T 7408（ISO 8601）。
 
-完整映射见 [references/standards-map.md](references/standards-map.md)。
+完整映射见 [skills/clarify-spec/references/standards-map.md](skills/clarify-spec/references/standards-map.md)。
 
 ## linter 的设计边界 / Linter Boundaries
 

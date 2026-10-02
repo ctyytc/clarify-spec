@@ -8,7 +8,7 @@ on:
 
 jobs:
   selftest:
-    # 两个 linter 的内置自检必须在多个 Python 版本上通过
+    # 两个 skill 的 linter 内置自检必须在多个 Python 版本上通过
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -18,10 +18,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: spec-lint selftest
-        run: python3 scripts/spec-lint.py --selftest
-      - name: msg-lint selftest
-        run: python3 scripts/msg-lint.py --selftest
+      - name: spec-lint selftest (clarify-spec)
+        run: python3 skills/clarify-spec/scripts/spec-lint.py --selftest
+      - name: spec-lint selftest (clarify-runtime copy)
+        run: python3 skills/clarify-runtime/scripts/spec-lint.py --selftest
+      - name: msg-lint selftest (clarify-runtime)
+        run: python3 skills/clarify-runtime/scripts/msg-lint.py --selftest
 
   docs:
     # 正式文档零硬性违规；负向测试确认 linter「该失败时会失败」
@@ -29,20 +31,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Formal docs must have zero hard violations
-        run: python3 scripts/spec-lint.py SKILL.md README.md references/
+        run: python3 skills/clarify-spec/scripts/spec-lint.py skills/clarify-spec/SKILL.md skills/clarify-runtime/SKILL.md README.md skills/clarify-spec/references/ skills/clarify-runtime/references/
       - name: Runtime message examples must stay clean
-        run: python3 scripts/spec-lint.py examples/runtime-messages.md
+        run: python3 skills/clarify-runtime/scripts/spec-lint.py skills/clarify-runtime/examples/runtime-messages.md
       - name: Edge-case fixture must fail (negative test)
         run: |
-          if python3 scripts/spec-lint.py examples/linter-edge-cases.md > /dev/null; then
+          if python3 skills/clarify-spec/scripts/spec-lint.py skills/clarify-spec/examples/linter-edge-cases.md > /dev/null; then
             echo "linter-edge-cases.md passed but must fail"
             exit 1
           fi
-      - name: SKILL.md size budget (500 lines)
+      - name: SKILL.md size budget (500 lines each)
         run: |
-          lines=$(wc -l < SKILL.md)
-          echo "SKILL.md: ${lines} lines (budget 500)"
-          test "${lines}" -le 500
+          for f in skills/clarify-spec/SKILL.md skills/clarify-runtime/SKILL.md; do
+            lines=$(wc -l < "$f")
+            echo "$f: ${lines} lines (budget 500)"
+            test "${lines}" -le 500
+          done
+      - name: Duplicated files must stay identical across skills
+        run: |
+          diff skills/clarify-spec/scripts/spec-lint.py skills/clarify-runtime/scripts/spec-lint.py
+          diff skills/clarify-spec/scripts/clarify_config.py skills/clarify-runtime/scripts/clarify_config.py
+          diff skills/clarify-spec/references/human-expression-rules.md skills/clarify-runtime/references/human-expression-rules.md
 
   messages:
     # 消息契约：合规夹具通过，违规夹具必须失败；协议 profile 映射可执行
@@ -50,18 +59,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Valid message fixture passes
-        run: python3 scripts/msg-lint.py tests/fixtures/message-valid.json
+        run: python3 skills/clarify-runtime/scripts/msg-lint.py skills/clarify-runtime/tests/fixtures/message-valid.json
       - name: Invalid message fixture must fail (negative test)
         run: |
-          if python3 scripts/msg-lint.py tests/fixtures/message-invalid.json > /dev/null; then
+          if python3 skills/clarify-runtime/scripts/msg-lint.py skills/clarify-runtime/tests/fixtures/message-invalid.json > /dev/null; then
             echo "message-invalid.json passed but must fail"
             exit 1
           fi
       - name: A2A profile — valid fixture passes
-        run: python3 scripts/msg-lint.py --profile a2a tests/fixtures/a2a-message.json
+        run: python3 skills/clarify-runtime/scripts/msg-lint.py --profile a2a skills/clarify-runtime/tests/fixtures/a2a-message.json
       - name: A2A profile — missing contextId/taskId must fail (negative test)
         run: |
-          if python3 scripts/msg-lint.py --profile a2a tests/fixtures/message-invalid.json > /dev/null; then
+          if python3 skills/clarify-runtime/scripts/msg-lint.py --profile a2a skills/clarify-runtime/tests/fixtures/message-invalid.json > /dev/null; then
             echo "invalid envelope must fail under a2a profile"
             exit 1
           fi
@@ -72,16 +81,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Extended config lets sample-doc pass
-        run: python3 scripts/spec-lint.py --config tests/fixtures/config/extend.yml tests/fixtures/config/sample-doc.md
+        run: python3 skills/clarify-spec/scripts/spec-lint.py --config skills/clarify-spec/tests/fixtures/config/extend.yml skills/clarify-spec/tests/fixtures/config/sample-doc.md
       - name: Added wordlist entry must fail (negative test)
         run: |
-          if python3 scripts/spec-lint.py --config tests/fixtures/config/extend.yml tests/fixtures/config/sample-doc-2.md > /dev/null; then
+          if python3 skills/clarify-spec/scripts/spec-lint.py --config skills/clarify-spec/tests/fixtures/config/extend.yml skills/clarify-spec/tests/fixtures/config/sample-doc-2.md > /dev/null; then
             echo "sample-doc-2.md passed but must fail under extended config"
             exit 1
           fi
       - name: Malformed config must exit 2 (fail-loud, never silent fallback)
         run: |
           printf 'unknown_key: 1\n' > /tmp/bad-clarify.yml
-          python3 scripts/spec-lint.py --config /tmp/bad-clarify.yml tests/fixtures/config/sample-doc-2.md 2>/dev/null && code=0 || code=$?
+          python3 skills/clarify-spec/scripts/spec-lint.py --config /tmp/bad-clarify.yml skills/clarify-spec/tests/fixtures/config/sample-doc-2.md 2>/dev/null && code=0 || code=$?
           echo "exit code: ${code}"
           test "${code}" -eq 2
