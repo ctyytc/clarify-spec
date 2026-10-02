@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  selftest:
+    # 两个 linter 的内置自检必须在多个 Python 版本上通过
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: spec-lint selftest
+        run: python3 scripts/spec-lint.py --selftest
+      - name: msg-lint selftest
+        run: python3 scripts/msg-lint.py --selftest
+
+  docs:
+    # 正式文档零硬性违规；负向测试确认 linter「该失败时会失败」
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Formal docs must have zero hard violations
+        run: python3 scripts/spec-lint.py SKILL.md README.md references/
+      - name: Runtime message examples must stay clean
+        run: python3 scripts/spec-lint.py examples/runtime-messages.md
+      - name: Edge-case fixture must fail (negative test)
+        run: |
+          if python3 scripts/spec-lint.py examples/linter-edge-cases.md > /dev/null; then
+            echo "linter-edge-cases.md passed but must fail"
+            exit 1
+          fi
+      - name: SKILL.md size budget (500 lines)
+        run: |
+          lines=$(wc -l < SKILL.md)
+          echo "SKILL.md: ${lines} lines (budget 500)"
+          test "${lines}" -le 500
+
+  messages:
+    # 消息契约：合规夹具通过，违规夹具必须失败
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Valid message fixture passes
+        run: python3 scripts/msg-lint.py tests/fixtures/message-valid.json
+      - name: Invalid message fixture must fail (negative test)
+        run: |
+          if python3 scripts/msg-lint.py tests/fixtures/message-invalid.json > /dev/null; then
+            echo "message-invalid.json passed but must fail"
+            exit 1
+          fi

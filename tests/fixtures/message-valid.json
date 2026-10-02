@@ -1,0 +1,16 @@
+{
+  "message_id": "m-9f3a",
+  "sender": "planner",
+  "recipient": "coder",
+  "timestamp": "2026-10-02T08:00:00Z",
+  "correlation_id": "c-77",
+  "intent": "delegate",
+  "schema_version": "1.0.0",
+  "ack_required": "response",
+  "timeout_seconds": 1800,
+  "confidence": "inferred",
+  "assumption": "parser 模块指 src/parser.py（commit a1b2c3d）中的实现",
+  "task_ref": "TASK-014",
+  "message": "重构 parser 模块的 tokenize 函数。完成条件：42 个单元测试全部通过。",
+  "due": "2026-10-02T09:00:00Z"
+}

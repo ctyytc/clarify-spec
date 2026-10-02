@@ -1,5 +1,7 @@
 # clarify-spec
 
+[![ci](https://github.com/ctyytc/clarify-spec/actions/workflows/ci.yml/badge.svg)](https://github.com/ctyytc/clarify-spec/actions/workflows/ci.yml)
+
 本 Skill 面向 Vibe Coding 的三类文本：人类表达、Multi-Agent 过程文件与 Agent 运行时消息。目标是对它们进行消歧与规范化。
 A skill for **disambiguating and standardizing** human expression, multi-agent process artifacts, and runtime agent messages during Vibe Coding. Bilingual (中文/EN). Ships two deterministic linters as the executable spec.
 
@@ -37,6 +39,9 @@ clarify-spec/
 ├── scripts/
 │   ├── spec-lint.py                # 散文与过程文件 linter（纯 stdlib）
 │   └── msg-lint.py                 # 运行时消息契约 linter（纯 stdlib）
+├── tests/
+│   └── fixtures/                   # CI 正负夹具（message-valid / message-invalid）
+├── .github/workflows/ci.yml        # 双 linter 自检 + 零违规门禁 + 负向测试
 └── examples/
     ├── before-after.md             # 中英对照改写示例
     ├── runtime-messages.md         # 运行时消息改写示例
