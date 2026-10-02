@@ -105,8 +105,8 @@ description: "对 Vibe Coding 中的人类表达、Multi-Agent 过程文件与 A
 - `references/protocol-mapping.md` — C 类字段与 A2A / MCP 的逐字段对齐映射（含 `--profile` 可执行模式）。
 - `references/standards-map.md` — 中英文标准映射与关键解释。
 - `references/templates.md` — PLAN / HANDOFF / ADR / STATUS 最小模板。
-- `scripts/spec-lint.py` — 散文与过程文件 linter（纯 stdlib）。硬性违规超 `--baseline` 时 exit 1；建议性发现永不失败；`--selftest` 内置自检；自动跳过代码围栏与行内代码。
-- `scripts/msg-lint.py` — 运行时消息契约 linter（纯 stdlib）。检查 C-1/C-2/C-5/C-6/C-10 与建议性 C-7/C-11/C-12；同一退出码契约；`--selftest` 内置自检。
+- `scripts/spec-lint.py` — 散文与过程文件 linter（纯 stdlib）。硬性违规超 `--baseline` 时 exit 1；建议性发现永不失败。`--selftest` 内置自检。自动跳过代码围栏与行内代码。支持 `--config` 加载项目级 `.clarify-spec.yml` 扩充词表并覆盖阈值（配置损坏 exit 2）。
+- `scripts/msg-lint.py` — 运行时消息契约 linter（纯 stdlib）。检查 C-1/C-2/C-5/C-6/C-10 与建议性 C-7/C-11/C-12；同一退出码契约；`--selftest` 内置自检；`--config` 项目级词表扩展同样适用。
 - `examples/before-after.md` — 中英对照改写示例。
 - `examples/runtime-messages.md` — 运行时消息改写示例。
 - `examples/linter-edge-cases.md` — 边界测试夹具（故意不合规）。

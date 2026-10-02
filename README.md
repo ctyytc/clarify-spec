@@ -38,10 +38,12 @@ clarify-spec/
 │   ├── standards-map.md            # 中英经典标准映射总表
 │   └── templates.md                # PLAN / HANDOFF / ADR / STATUS 最小模板
 ├── scripts/
-│   ├── spec-lint.py                # 散文与过程文件 linter（纯 stdlib）
-│   └── msg-lint.py                 # 运行时消息契约 linter（含 --profile 协议适配）
+│   ├── clarify_config.py             # 项目级配置加载（受限 YAML，单一事实源）
+│   ├── spec-lint.py                  # 散文与过程文件 linter（纯 stdlib）
+│   └── msg-lint.py                   # 运行时消息契约 linter（含 --profile 协议适配）
 ├── tests/
-│   └── fixtures/                   # CI 正负夹具（independent / a2a 两套）
+│   └── fixtures/                     # CI 正负夹具（independent / a2a 两套）
+│       └── config/                   # 项目级配置夹具（extend.yml 及配套文档）
 ├── .github/workflows/ci.yml        # 双 linter 自检 + 零违规门禁 + 负向测试
 └── examples/
     ├── before-after.md             # 中英对照改写示例
@@ -78,7 +80,36 @@ python3 scripts/msg-lint.py --profile a2a msg.json # A2A 协议适配（另有 m
 python3 scripts/msg-lint.py --selftest             # 内置自检
 ```
 
-退出码契约（两个 linter 一致）：硬性违规数 > `--baseline`（默认 0）时 exit 1；建议性发现永不导致失败。
+退出码契约（两个 linter 一致）：硬性违规数 > `--baseline`（默认 0）时 exit 1；建议性发现永不导致失败。配置损坏（`--config` 文件语法或语义非法）时 exit 2 —— fail-loud，绝不静默回退内置默认。
+
+## 项目级配置 / Project-Level Configuration
+
+团队可在工作目录（项目根）放置 `.clarify-spec.yml`，对词表与阈值做差异覆盖。两个 linter 默认自输入文件所在目录**向上逐级查找**该文件，也可用 `--config PATH` 显式指定。文本输出与 `--json` 均报告生效配置来源与内容摘要（sha256 前 12 位），保证 CI 可精确复现。
+
+```yaml
+# .clarify-spec.yml —— 受限 YAML 子集：仅 extends / override / add / remove 四个顶层键
+extends: default          # 唯一合法值；基线永远是内置默认
+
+override:
+  zh_sentence_limit: 80   # 阈值只可覆盖（可覆盖键见 clarify_config.THRESHOLDS）
+
+add:
+  vague_quantifier_zh: [差不多]   # 词表只可扩充…
+  intent_enum:                   # …或按块列表书写
+    - escalate
+
+remove:
+  vague_quantifier_zh: [相关]    # 也可移除默认条目
+```
+
+配置语义（锁定项）：
+
+1. **词表只增删**：默认词表不可整体替换，`add` 追加、`remove` 移除条目，其余默认条目保留。
+2. **阈值只覆盖**：仅 `clarify_config.THRESHOLDS` 中的五个键可被 `override`，且必须为整数。
+3. **分级与退出码不可配置**：规则 HARD/ADVISORY 分级、`exit 1` / `exit 2` 契约由 linter 锁定。
+4. **fail-loud**：任何语法或语义错误（未知键、未知词表或阈值、非整数值等）都以 exit 2 退出。诊断信息带行号，绝不静默回退到内置默认。
+
+Project-level configuration: drop a `.clarify-spec.yml` at the project root to extend or trim wordlists and override thresholds. Wordlists can only be appended to or trimmed. Thresholds can only be overridden. Rule severity and the exit-code contract are locked. A malformed config fails loudly with exit 2 — never a silent fallback.
 
 ## 使用 / Usage
 

@@ -14,7 +14,11 @@ msg-lint.py — Agent 运行时消息（A2A / 工具调用 / 事件）的确定�
     cat msg.json | python3 msg-lint.py -
     python3 msg-lint.py --json msgs/
     python3 msg-lint.py --baseline 3 --disable c10-time-relative MSG.json
+    python3 msg-lint.py --config .clarify-spec.yml MSG.json  # 项目级词表/阈值配置
     python3 msg-lint.py --selftest
+
+配置语义与 spec-lint.py 共享 clarify_config.py 单一事实源：
+词表只增删、阈值只覆盖、规则分级与退出码契约锁定；配置损坏 exit 2（fail-loud）。
 """
 
 import argparse
@@ -23,24 +27,16 @@ import os
 import re
 import sys
 
-VERSION = "0.3.0"
+import clarify_config
 
-INTENT_ENUM = ("delegate", "query", "respond", "report", "clarify", "cancel")
+VERSION = "0.4.0"
+
 REQUIRED_ENVELOPE = ("message_id", "sender", "recipient",
                      "timestamp", "correlation_id", "intent")
 ERROR_REQUIRED = ("error_code", "message", "retryable", "recovery_hint")
 
 RFC3339_UTC = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
-
-RELATIVE_TIME_ZH = ["稍后", "一会儿", "马上", "尽快", "过两天", "下周"]
-RELATIVE_TIME_EN = ["later", "in a while", "asap", "soon", "shortly"]
-
-HEDGES_ZH = ["可能", "也许", "大概", "没准"]
-HEDGES_EN = ["maybe", "perhaps", "possibly", "probably"]
-
-PAYLOAD_LIMIT = 2000      # C-11：超过此字符数的 payload 应外置为 artifact
-LONG_FIELD_LIMIT = 500    # 单字段超长：提示外置并按 A 类 prose 规则检查
 
 PROFILES = ("independent", "a2a", "mcp-request", "mcp-result")
 
@@ -156,7 +152,15 @@ def canonicalize(msg, profile):
     return canon, skip
 
 
-def scan_message(msg, filename, disabled, skip_fields=()):
+def scan_message(msg, filename, disabled, skip_fields=(), settings=None):
+    if settings is None:
+        settings = clarify_config.Settings.built_in()
+    intent_enum = settings.wordlist("intent_enum")
+    relative_time = (settings.wordlist("relative_time_zh")
+                     + settings.wordlist("relative_time_en"))
+    hedges = settings.wordlist("hedges_zh") + settings.wordlist("hedges_en")
+    payload_limit = settings.threshold("payload_limit")
+    long_field_limit = settings.threshold("long_field_limit")
     findings = []
     disabled = set(disabled)
     skip = set(skip_fields)
@@ -180,9 +184,9 @@ def scan_message(msg, filename, disabled, skip_fields=()):
 
     # --- C-2 意图枚举 ---
     intent = msg.get("intent")
-    if intent is not None and intent not in INTENT_ENUM:
+    if intent is not None and intent not in intent_enum:
         add("$.intent", "c2-intent-enum", HARD,
-            f"intent「{intent}」不在封闭枚举内 / intent must be one of {', '.join(INTENT_ENUM)}")
+            f"intent「{intent}」不在封闭枚举内 / intent must be one of {', '.join(intent_enum)}")
 
     # --- C-6 错误机器可读 ---
     err = msg.get("error")
@@ -195,14 +199,14 @@ def scan_message(msg, filename, disabled, skip_fields=()):
     # --- 文本字段扫描：C-10 相对时间、C-5 情态字段化、长文本建议 ---
     hedged = False
     for path, text in walk_strings(msg):
-        for w in RELATIVE_TIME_ZH + RELATIVE_TIME_EN:
+        for w in relative_time:
             if hit_word(text, w):
                 add(path, "c10-time-relative", HARD,
                     f"相对时间「{w}」：改用绝对 UTC 时间戳 / relative time; use an absolute UTC timestamp")
-        for w in HEDGES_ZH + HEDGES_EN:
+        for w in hedges:
             if hit_word(text, w):
                 hedged = True
-        if len(text) > LONG_FIELD_LIMIT:
+        if len(text) > long_field_limit:
             add(path, "c11-long-field", ADVISORY,
                 f"文本字段 {len(text)} 字符：建议外置为 artifact 并按 A 类规则检查 / long text field; consider an artifact reference")
 
@@ -221,9 +225,9 @@ def scan_message(msg, filename, disabled, skip_fields=()):
     payload = msg.get("payload")
     if payload is not None:
         size = len(json.dumps(payload, ensure_ascii=False))
-        if size > PAYLOAD_LIMIT and "artifact_ref" not in msg:
+        if size > payload_limit and "artifact_ref" not in msg:
             add("$.payload", "c11-payload-size", ADVISORY,
-                f"payload {size} 字符（上限 {PAYLOAD_LIMIT}）：外置为 artifact 并传 artifact_ref / payload too large; use an artifact reference")
+                f"payload {size} 字符（上限 {payload_limit}）：外置为 artifact 并传 artifact_ref / payload too large; use an artifact reference")
 
     return findings
 
@@ -312,13 +316,23 @@ def selftest():
     # 建议性永不失败：满建议性消息硬性数必须为 0
     advisory_only = {k: v for k, v in base.items()
                      if k not in ("ack_required", "timeout_seconds", "schema_version")}
-    advisory_only["payload"] = "x" * (PAYLOAD_LIMIT + 1)
+    advisory_only["payload"] = "x" * (clarify_config.DEFAULT_THRESHOLDS["payload_limit"] + 1)
     hard = [f for f in scan_message(advisory_only, "<selftest>", set()) if f.severity == HARD]
     if hard:
         failed += 1
         print(f"[FAIL] 建议性隔离：出现 {len(hard)} 条硬性违规")
     else:
         print("[PASS] 建议性隔离：缺 ack/timeout/version 与大 payload 不触发硬性违规")
+    # 项目级配置：扩充 intent_enum 后新意图合法
+    cfg = clarify_config.Settings.built_in().apply(
+        clarify_config.parse_config("add:\n  intent_enum: [escalate]\n"))
+    got = {f.rule for f in scan_message(dict(base, intent="escalate"), "<selftest>", set(), (), cfg)}
+    if not got:
+        print("[PASS] 项目级配置：intent_enum 扩充后 escalate 合法")
+    else:
+        failed += 1
+        print(f"[FAIL] 项目级配置 intent_enum：命中={sorted(got)}")
+    failed += clarify_config.selftest()
     print(f"\nselftest: {'全部通过' if failed == 0 else f'{failed} 项失败'}")
     return 1 if failed else 0
 
@@ -347,6 +361,9 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true", help="结构化 JSON 输出")
     ap.add_argument("--baseline", type=int, default=0, help="允许的硬性违规数")
     ap.add_argument("--disable", default="", help="逗号分隔的禁用的规则名")
+    ap.add_argument("--config", metavar="PATH",
+                    help="项目级 .clarify-spec.yml 路径；缺省时自输入向上查找；"
+                         "配置损坏则 exit 2（fail-loud，绝不静默回退）")
     ap.add_argument("--selftest", action="store_true", help="运行内置自检")
     args = ap.parse_args(argv)
 
@@ -354,6 +371,13 @@ def main(argv=None):
         return selftest()
     if not args.files:
         ap.error("请提供 JSON 文件、目录或 -（stdin）")
+
+    try:
+        settings, cfg_source, cfg_digest = clarify_config.load_settings(
+            args.config, start_dir=args.files[0] if len(args.files) == 1 else os.getcwd())
+    except clarify_config.ConfigError as exc:
+        print(f"msg-lint: 配置文件损坏（{exc}）/ malformed config", file=sys.stderr)
+        return 2
 
     disabled = {s.strip() for s in args.disable.split(",") if s.strip()}
     all_findings = []
@@ -364,7 +388,7 @@ def main(argv=None):
             all_findings.append(Finding(filename, "$", "c0-parse", HARD, f"JSON 解析失败：{e}"))
             continue
         canon, skip = canonicalize(msg, args.profile)
-        for f in scan_message(canon, filename, disabled, skip):
+        for f in scan_message(canon, filename, disabled, skip, settings):
             if args.profile != "independent":
                 f.path = f"[{args.profile}]{f.path}"
             all_findings.append(f)
@@ -376,6 +400,7 @@ def main(argv=None):
     if args.json:
         print(json.dumps({
             "tool": "msg-lint", "version": VERSION, "profile": args.profile,
+            "config": {"source": cfg_source, "digest": cfg_digest},
             "summary": {"hard": len(hard), "advisory": len(advisory),
                         "baseline": args.baseline, "exit": exit_code},
             "findings": [f.to_dict() for f in all_findings],
@@ -385,6 +410,10 @@ def main(argv=None):
             print(f"{f.file}:{f.path} [{f.severity}] {f.rule}: {f.message}")
         print(f"\n{len(hard)} hard / {len(advisory)} advisory "
               f"(baseline {args.baseline}) -> exit {exit_code}")
+        if cfg_source != "built-in defaults":
+            print(f"config: {cfg_source} (sha256:{cfg_digest})")
+        else:
+            print("config: built-in defaults")
 
     return exit_code
 

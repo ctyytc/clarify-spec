@@ -1,0 +1,11 @@
+# 测试用项目级配置：差异覆盖内置默认
+extends: default
+
+override:
+  zh_sentence_limit: 80
+
+add:
+  vague_quantifier_zh: [差不多]
+
+remove:
+  vague_quantifier_zh: [相关]

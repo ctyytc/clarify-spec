@@ -65,3 +65,23 @@ jobs:
             echo "invalid envelope must fail under a2a profile"
             exit 1
           fi
+
+  config:
+    # 项目级 .clarify-spec.yml：词表增删与阈值覆盖可执行，损坏配置 fail-loud（exit 2）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extended config lets sample-doc pass
+        run: python3 scripts/spec-lint.py --config tests/fixtures/config/extend.yml tests/fixtures/config/sample-doc.md
+      - name: Added wordlist entry must fail (negative test)
+        run: |
+          if python3 scripts/spec-lint.py --config tests/fixtures/config/extend.yml tests/fixtures/config/sample-doc-2.md > /dev/null; then
+            echo "sample-doc-2.md passed but must fail under extended config"
+            exit 1
+          fi
+      - name: Malformed config must exit 2 (fail-loud, never silent fallback)
+        run: |
+          printf 'unknown_key: 1\n' > /tmp/bad-clarify.yml
+          python3 scripts/spec-lint.py --config /tmp/bad-clarify.yml tests/fixtures/config/sample-doc-2.md 2>/dev/null && code=0 || code=$?
+          echo "exit code: ${code}"
+          test "${code}" -eq 2

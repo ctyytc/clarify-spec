@@ -14,7 +14,14 @@ spec-lint.py — 对人类表达与 Multi-Agent 过程文件进行确定性消�
     python3 spec-lint.py --json docs/
     python3 spec-lint.py --baseline 5 --disable en-passive,zh-semicolon FILE
     python3 spec-lint.py --kind handoff HANDOFF.md     # 过程文件头契约检查
+    python3 spec-lint.py --config .clarify-spec.yml .  # 项目级词表/阈值配置
     python3 spec-lint.py --selftest                    # 内置自检
+
+配置语义（与 clarify_config.py 一致，单一事实源）：
+1. 词表只可扩充（add）或移除条目（remove），默认词表不可整体替换；
+2. 阈值只可覆盖（override），键名见 clarify_config.THRESHOLDS；
+3. 规则分级（HARD/ADVISORY）与退出码契约锁定，不可配置；
+4. 配置损坏时 fail-loud：stderr 说明并以 exit 2 退出，绝不静默回退默认。
 """
 
 import argparse
@@ -23,18 +30,14 @@ import os
 import re
 import sys
 
-VERSION = "0.1.0"
+import clarify_config
+
+VERSION = "0.4.0"
 
 # ---------------------------------------------------------------------------
-# 规则词表（词表本身即规范的一部分；新增规则优先在此登记）
+# 编译型规则模式（词表类规则见 clarify_config.py 的 WORDLISTS，可在项目级
+# .clarify-spec.yml 中扩充；此处只保留不可配置的编译型模式）
 # ---------------------------------------------------------------------------
-
-EN_PHRASAL_VERBS = [
-    "spin up", "shut down", "take off", "kick off", "reach out", "dive into",
-    "carry out", "roll back", "log in", "log out", "sign up", "set up",
-    "point out", "figure out", "look up", "hook up", "scale up", "speed up",
-    "break down", "clean up", "wrap up", "sum up", "check out",
-]
 
 EN_NOMINALIZATION = re.compile(
     r"\b(?:make|perform|provide|do|conduct|carry out)\s+(?:a|an|the)\s+"
@@ -42,18 +45,6 @@ EN_NOMINALIZATION = re.compile(
     r"review|update|inspection|evaluation)\b",
     re.IGNORECASE,
 )
-
-MARKETING_WORDS = [
-    # 英文：声称质量而不给出度量
-    "seamless", "robust", "powerful", "cutting-edge", "effortless",
-    "blazing", "state-of-the-art", "revolutionary", "world-class",
-    "best-in-class", "industry-leading",
-    # 中文：同义项
-    "无缝", "丝滑", "强大", "极致", "革命性", "颠覆性", "赋能", "业界领先",
-    "世界一流", "领先一代",
-]
-
-VAGUE_ZH_QUANTIFIERS = ["等等", "相关", "有关", "各种", "之类", "诸多", "若干"]
 
 EN_PASSIVE = re.compile(
     r"\b(?:is|are|was|were|be|been|being)\s+(?:\w+\s+){0,3}\w+ed\b",
@@ -84,10 +75,6 @@ KIND_REQUIRED_FIELDS = {
 
 HARD = "HARD"
 ADVISORY = "ADVISORY"
-
-EN_SENT_LIMIT = 25   # 词（对应 STE 描述性文本上限）
-ZH_SENT_LIMIT = 60   # 字（中文信息密度约为英文 1.5–2 倍字符量）
-ZH_PRONOUN_PARA_LIMIT = 5  # 每个段落内指示代词超过此数为建议性发现
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +195,16 @@ def build_segments(lines, line_nos):
     return segs
 
 
-def scan_text(text, filename, disabled):
+def scan_text(text, filename, disabled, settings=None):
+    if settings is None:
+        settings = clarify_config.Settings.built_in()
+    zh_sent_limit = settings.threshold("zh_sentence_limit")
+    en_sent_limit = settings.threshold("en_sentence_limit")
+    zh_pronoun_para_limit = settings.threshold("zh_pronoun_paragraph_limit")
+    marketing_words = (settings.wordlist("marketing_en")
+                       + settings.wordlist("marketing_zh"))
+    vague_quantifiers = settings.wordlist("vague_quantifier_zh")
+    phrasal_verbs = settings.wordlist("phrasal_verb_en")
     findings = []
     raw_lines, first_no = strip_frontmatter(text)
     lines, line_nos = strip_fenced("\n".join(raw_lines))
@@ -228,11 +224,11 @@ def scan_text(text, filename, disabled):
         if "；" in line:
             add(no, "zh-semicolon", ADVISORY,
                 "中文分号；并列分句建议拆句或改为列表 / consider splitting the clause")
-        for w in MARKETING_WORDS:
+        for w in marketing_words:
             if re.search(re.escape(w), line, re.IGNORECASE if w.isascii() else 0):
                 add(no, "marketing-word", HARD,
                     f"营销词「{w}」：声称质量而不给出度量，删除或改为度量值 / marketing adjective; delete or cite the metric")
-        for w in VAGUE_ZH_QUANTIFIERS:
+        for w in vague_quantifiers:
             if w in line:
                 add(no, "vague-quantifier", HARD,
                     f"模糊量词「{w}」造成范围二义；枚举全部项或给出确切范围 / vague quantifier; enumerate or quantify")
@@ -240,7 +236,7 @@ def scan_text(text, filename, disabled):
         if m:
             add(no, "en-nominalization", HARD,
                 f"名词化动作「{m.group(0)}」：改用动词使动作与执行者显式 / use the verb form instead")
-        for pv in EN_PHRASAL_VERBS:
+        for pv in phrasal_verbs:
             if re.search(r"\b" + re.escape(pv) + r"\b", line, re.IGNORECASE):
                 add(no, "en-phrasal-verb", HARD,
                     f"短语动词「{pv}」语义不可由部件推知；改用单一动词 / replace with a single plain verb")
@@ -260,16 +256,16 @@ def scan_text(text, filename, disabled):
         for sent in split_sentences(clean):
             if has_cjk(sent):
                 n = char_count(sent)
-                if n > ZH_SENT_LIMIT:
+                if n > zh_sent_limit:
                     add(base_no, "zh-long-sentence", HARD,
-                        f"中文句长 {n} 字（上限 {ZH_SENT_LIMIT}）；一述一义，拆为多单句 / split into one-claim sentences")
+                        f"中文句长 {n} 字（上限 {zh_sent_limit}）；一述一义，拆为多单句 / split into one-claim sentences")
             else:
                 n = word_count(sent)
-                if n > EN_SENT_LIMIT:
+                if n > en_sent_limit:
                     add(base_no, "en-long-sentence", HARD,
-                        f"英文句长 {n} 词（上限 {EN_SENT_LIMIT}）；一述一义，拆为多单句 / split into one-claim sentences")
+                        f"英文句长 {n} 词（上限 {en_sent_limit}）；一述一义，拆为多单句 / split into one-claim sentences")
         zh_pron = ZH_PRONOUN.findall(clean)
-        if len(zh_pron) > ZH_PRONOUN_PARA_LIMIT:
+        if len(zh_pron) > zh_pronoun_para_limit:
             add(base_no, "zh-pronoun-chain", ADVISORY,
                 f"段落内指示代词 ×{len(zh_pron)}（其/该/此/上述…）；就近还原名词以消歧 / restore the noun near its use")
 
@@ -359,6 +355,27 @@ def selftest():
     else:
         failed += 1
         print("[FAIL] kind-contract：adr 缺字段未被报告")
+    # 项目级配置：扩充词表后新词命中、移除词表后旧词放行、阈值覆盖生效
+    cfg = clarify_config.Settings.built_in().apply(
+        clarify_config.parse_config(
+            "override:\n  zh_sentence_limit: 10\n"
+            "add:\n  vague_quantifier_zh: [差不多]\n"
+            "remove:\n  vague_quantifier_zh: [相关]\n"))
+    got = {f.rule for f in scan_text("结果差不多完成了。涉及相关的配置。", "<selftest>", set(), cfg)}
+    if "vague-quantifier" in got and len(got) == 1:
+        print("[PASS] 项目级配置：add/remove 词表生效")
+    else:
+        failed += 1
+        print(f"[FAIL] 项目级配置词表：命中={sorted(got)}")
+    long_zh = "这是一句用于阈值覆盖验证的中文句子，长度超过十个字但不超过默认上限。"
+    got2 = {f.rule for f in scan_text(long_zh, "<selftest>", set(), cfg)}
+    if "zh-long-sentence" in got2:
+        print("[PASS] 项目级配置：override 阈值生效")
+    else:
+        failed += 1
+        print(f"[FAIL] 项目级配置阈值：命中={sorted(got2)}")
+    # 共享配置模块自检
+    failed += clarify_config.selftest()
     print(f"\nselftest: {'全部通过' if failed == 0 else f'{failed} 项失败'}")
     return 1 if failed else 0
 
@@ -393,6 +410,9 @@ def main(argv=None):
     ap.add_argument("--disable", default="", help="逗号分隔的禁用的规则名")
     ap.add_argument("--kind", choices=sorted(KIND_REQUIRED_FIELDS),
                     help="按过程文件类型检查头契约：plan/handoff/adr/status")
+    ap.add_argument("--config", metavar="PATH",
+                    help="项目级 .clarify-spec.yml 路径；缺省时自输入向上查找；"
+                         "配置损坏则 exit 2（fail-loud，绝不静默回退）")
     ap.add_argument("--selftest", action="store_true", help="运行内置自检")
     args = ap.parse_args(argv)
 
@@ -401,20 +421,29 @@ def main(argv=None):
     if not args.files:
         ap.error("请提供文件路径、目录或 -（stdin）")
 
+    try:
+        settings, cfg_source, cfg_digest = clarify_config.load_settings(
+            args.config, start_dir=args.files[0] if len(args.files) == 1 else os.getcwd())
+    except clarify_config.ConfigError as exc:
+        print(f"spec-lint: 配置文件损坏（{exc}）/ malformed config", file=sys.stderr)
+        return 2
+
     disabled = {s.strip() for s in args.disable.split(",") if s.strip()}
     all_findings = []
     for filename, text in iter_input_files(args.files):
-        all_findings.extend(scan_text(text, filename, disabled))
+        all_findings.extend(scan_text(text, filename, disabled, settings))
         if args.kind:
             all_findings.extend(scan_kind_contract(text, filename, args.kind, disabled))
 
     hard = [f for f in all_findings if f.severity == HARD]
     advisory = [f for f in all_findings if f.severity == ADVISORY]
+    cfg_info = {"source": cfg_source, "digest": cfg_digest}
 
     if args.json:
         print(json.dumps({
             "tool": "spec-lint",
             "version": VERSION,
+            "config": cfg_info,
             "summary": {"hard": len(hard), "advisory": len(advisory),
                         "baseline": args.baseline, "exit": 1 if len(hard) > args.baseline else 0},
             "findings": [f.to_dict() for f in all_findings],
@@ -424,6 +453,10 @@ def main(argv=None):
             print(f"{f.file}:{f.line} [{f.severity}] {f.rule}: {f.message}")
         print(f"\n{len(hard)} hard / {len(advisory)} advisory "
               f"(baseline {args.baseline}) -> exit {1 if len(hard) > args.baseline else 0}")
+        if cfg_source != "built-in defaults":
+            print(f"config: {cfg_source} (sha256:{cfg_digest})")
+        else:
+            print("config: built-in defaults")
 
     return 1 if len(hard) > args.baseline else 0
 
