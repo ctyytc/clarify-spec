@@ -91,7 +91,7 @@ python3 scripts/msg-lint.py --selftest             # 内置自检
 
 ## 标准依据 / Standards
 
-**英文标准**：ASD-STE100 Issue 9（2025）、RFC 2119、RFC 8174。以及 RFC 7807、RFC 3339、RFC 9110。另有 W3C Trace Context；ISO/IEC/IEEE 29148；Michael Nygard ADR；Keep a Changelog；SemVer。
+**英文标准**：ASD-STE100 Issue 9（2025）、RFC 2119、RFC 8174。以及 RFC 7807、RFC 3339、RFC 9110。另有 W3C Trace Context 与 ISO/IEC/IEEE 29148。以及 Nygard ADR、Keep a Changelog、SemVer。
 
 **中文标准**：GB/T 8567-2006、GB/T 8566-2007。以及 GB/T 9385、GB/T 25000.10、GB/T 7408（ISO 8601）。
 
