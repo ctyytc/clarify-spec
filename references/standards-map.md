@@ -1,6 +1,6 @@
 # 标准映射总表 / Standards Map
 
-本表回答一个问题：clarify-spec 的每一条规则，从中英文软件工程经典标准的哪一条来，用什么方式检查。规则条目全文见 `references/human-expression-rules.md` 与 `references/agent-artifacts-rules.md`。
+本表回答一个问题：clarify-spec 的每一条规则，从中英文软件工程经典标准的哪一条来，用什么方式检查。规则条目全文见 `references/human-expression-rules.md`、`references/agent-artifacts-rules.md` 与 `references/runtime-message-rules.md`。
 
 ## 总表
 
@@ -12,7 +12,7 @@
 | 表达 | 指称一致 | ASD-STE100 §1 | GB/T 8567 术语一致性 | H-A6, A-A4 | 模型 + `synonym-rotation`, `zh-pronoun-chain` |
 | 表达 | 模糊量词 | ASD-STE100 §1 | 科技写作规范（量词限定） | H-A7 | `vague-quantifier` |
 | 表达 | 营销词禁令 | ASD-STE100 §9 | GB/T 8567 客观陈述要求 | H-A8, A-A5 | `marketing-word` |
-| 表达 | 情态保护 | ASD-STE100 §3 | GB/T 9385 需求强度分级 | R-A1 | linter 自检固定「永不标记」 |
+| 表达 | 情态保护 | ASD-STE100 §3 | GB/T 9385 需求强度分级 | R-A1, C-5 | linter 自检固定「永不单独处罚」 |
 | 表达 | 中文句法 | —（STE 为英文标准，中文规则为类比推导） | GB/T 8567；科技期刊写作规范 | H-A9, A-A6 | `zh-long-sentence`, `zh-semicolon` |
 | 表达 | 英文句法 | ASD-STE100 Issue 9 §3–§9 | — | H-A10–H-A14 | `en-*` 系列 |
 | 架构 | 文件头契约 | ISO/IEC/IEEE 29119-3 | GB/T 8567-2006 | H-B1 | `kind-contract` |
@@ -20,9 +20,17 @@
 | 架构 | 交接三段式 | Diátaxis how-to | PMBOK 沟通模型 | H-B4–B6 | `kind-contract` + 模型 |
 | 架构 | ADR | Michael Nygard ADR；arc42 §9 | GB/T 8567 设计文档要求 | H-B7–B9, A-B1 | `kind-contract` + 模型 |
 | 架构 | 变更记录 | Keep a Changelog；SemVer | GB/T 8566 配置管理过程 | H-B15, H-B16 | 模型 |
-| 性能 | linter 设计 | Twelve-Factor 显式契约哲学 | GB/T 25000.10 可维护性 | 脚本即规范 | `scripts/spec-lint.py` |
+| 消息 | 信封与关联 | W3C Trace Context；RFC 5424 | —（国内分布式追踪实践等同采纳） | C-1 | `msg-lint.py` |
+| 消息 | 意图枚举 | 言语行为理论（Austin / Searle）；A2A 协议 | — | C-2 | `msg-lint.py` |
+| 消息 | 错误结构 | RFC 7807 problem+json | GB/T 25000.10 可维护性 | C-6 | `msg-lint.py` |
+| 消息 | 交付语义 | RFC 9110 幂等语义；MQTT QoS | — | C-7 | `msg-lint.py`（建议） |
+| 消息 | 时间表达 | RFC 3339 / ISO 8601 | GB/T 7408 数据元和交换格式 | C-10 | `msg-lint.py` |
+| 消息 | 实体锚定 | RFC 3986 URI 语义 | — | C-4 | 模型 |
+| 消息 | 上下文自足 | REST 无状态原则；十二要素 | — | C-9 | 模型 |
+| 消息 | 版本协商 | SemVer；OpenAPI 版本化 | GB/T 8566 配置管理过程 | C-12 | `msg-lint.py`（建议） |
+| 性能 | linter 设计 | Twelve-Factor 显式契约哲学 | GB/T 25000.10 可维护性 | 脚本即规范 | `spec-lint.py` + `msg-lint.py` |
 
-## 三个关键解释
+## 四个关键解释
 
 **1. STE 不覆盖中文，中文规则从哪来？**
 
@@ -34,17 +42,24 @@ RFC 2119 定义的是需求关键词的强度语义。Vibe Coding 中人类表�
 
 **3. linter 与模型的分工依据是什么？**
 
-机械规则交给确定性脚本：标点、句长、词表命中、字段存在性。脚本零成本、零漂移、可进 CI。语义判断规则交给模型：关键词同义替换、悬空条件、决策质量。脚本假装能查这些规则，只会制造虚假的合规感。这个分工符合 GB/T 25000.10 对可维护性的定义：规则显式、检查可重复、结果可解释。
+机械规则交给确定性脚本：标点、句长、词表命中、字段存在性。脚本零成本、零漂移、可进 CI。语义判断规则交给模型：关键词同义替换、悬空条件、决策质量、上下文自足。脚本假装能查这些规则，只会制造虚假的合规感。这个分工符合 GB/T 25000.10 对可维护性的定义：规则显式、检查可重复、结果可解释。
+
+**4. 为什么运行时消息（C 类）需要独立于过程文件（B 类）？**
+
+B 类过程文件至少假设会有人归档审阅，错误有机会在回顾时修正。C 类运行时消息的消费者是纯机器或另一个 Agent，消息发出即不可追问，错误会立即被执行而非被阅读。因此 B 类的「文件头契约」在 C 类升级为「信封契约」。新增四个字段：correlation_id 标识因果链，intent 作路由依据。error_code 供机读分支，confidence 承载置信度。文件面向阅读，消息面向执行——这是两套契约的分界线。
 
 ## 参考文献
 
 - ASD-STE100 Issue 9, *Simplified Technical English*, ASD, 2025-01. https://www.asd-ste100.org/
 - S. Bradner, *Key words for use in RFCs to Indicate Requirement Levels*, RFC 2119, 1997.
 - B. Leiba, *Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words*, RFC 8174, 2017.
+- M. Nottingham, *Problem Details for HTTP APIs*, RFC 7807, 2016.
 - IEEE Std 830-1998（已被 ISO/IEC/IEEE 29148:2018 取代）。
 - M. Nygard, *Documenting Architecture Decisions*, 2011. https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions
+- W3C, *Trace Context*, 2021. https://www.w3.org/TR/trace-context/
 - *Keep a Changelog*. https://keepachangelog.com/ ；*Semantic Versioning 2.0.0*. https://semver.org/
 - GB/T 8567-2006 计算机软件文档编制规范。
 - GB/T 8566-2007 信息技术 软件生存周期过程。
 - GB/T 9385-2008 计算机软件需求规格说明规范。
 - GB/T 25000.10 系统与软件工程 系统与软件质量要求和评价（SQuaRE）。
+- GB/T 7408-2005 数据元和交换格式 信息交换 日期和时间表示法（IDT ISO 8601）。
