@@ -1,0 +1,12 @@
+{
+  "messageId": "msg-uuid-1",
+  "role": "ROLE_AGENT",
+  "contextId": "ctx-77",
+  "taskId": "task-14",
+  "parts": [{"text": "重构 parser 模块。完成条件：42 个单元测试全部通过。"}],
+  "metadata": {
+    "clarify.intent": "delegate",
+    "clarify.timestamp": "2026-10-02T08:00:00Z",
+    "clarify.confidence": "confirmed"
+  }
+}

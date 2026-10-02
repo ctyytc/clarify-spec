@@ -45,7 +45,7 @@ jobs:
           test "${lines}" -le 500
 
   messages:
-    # 消息契约：合规夹具通过，违规夹具必须失败
+    # 消息契约：合规夹具通过，违规夹具必须失败；协议 profile 映射可执行
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,5 +55,13 @@ jobs:
         run: |
           if python3 scripts/msg-lint.py tests/fixtures/message-invalid.json > /dev/null; then
             echo "message-invalid.json passed but must fail"
+            exit 1
+          fi
+      - name: A2A profile: valid fixture passes
+        run: python3 scripts/msg-lint.py --profile a2a tests/fixtures/a2a-message.json
+      - name: A2A profile: missing contextId/taskId must fail (negative test)
+        run: |
+          if python3 scripts/msg-lint.py --profile a2a tests/fixtures/message-invalid.json > /dev/null; then
+            echo "invalid envelope must fail under a2a profile"
             exit 1
           fi

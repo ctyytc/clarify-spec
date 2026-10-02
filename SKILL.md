@@ -52,7 +52,7 @@ description: "对 Vibe Coding 中的人类表达、Multi-Agent 过程文件与 A
 
 1. **分类**。判定输入属于 A 类、B 类、C 类或混合；B 类进一步判定文件类型；C 类判定消息类型（委托/响应/错误/工具返回）。混合输入分段处理。
 2. **选模式**。Strict 或 Flavored；推断时一行声明。
-3. **机械扫描**。先跑确定性 linter 得到硬性违规清单：散文与过程文件用 `scripts/spec-lint.py`（加 `--kind` 检查 B 类文件头契约），JSON 消息用 `scripts/msg-lint.py`。
+3. **机械扫描**。先跑确定性 linter 得到硬性违规清单：散文与过程文件用 `scripts/spec-lint.py`（加 `--kind` 检查 B 类文件头契约），JSON 消息用 `scripts/msg-lint.py`（对接 A2A / MCP 时加 `--profile a2a|mcp-request|mcp-result`，字段映射见 `references/protocol-mapping.md`）。
 4. **改写**。逐条修复违规，同时满足以下红线：
    - 保留原文全部事实、条件、范围限定与量化指标。更短的措辞若损失必要精度，保留较长措辞并在输出中标注。
    - 保留每个情态表达的强度；禁止把 hedges 升级为事实，禁止添加原文没有陈述的原因、频率或机制。
@@ -102,6 +102,7 @@ description: "对 Vibe Coding 中的人类表达、Multi-Agent 过程文件与 A
 - `references/human-expression-rules.md` — A 类规则全文与 linter 映射。
 - `references/agent-artifacts-rules.md` — B 类规则全文与生命周期定义。
 - `references/runtime-message-rules.md` — C 类规则全文与 msg-lint 映射。
+- `references/protocol-mapping.md` — C 类字段与 A2A / MCP 的逐字段对齐映射（含 `--profile` 可执行模式）。
 - `references/standards-map.md` — 中英文标准映射与关键解释。
 - `references/templates.md` — PLAN / HANDOFF / ADR / STATUS 最小模板。
 - `scripts/spec-lint.py` — 散文与过程文件 linter（纯 stdlib）。硬性违规超 `--baseline` 时 exit 1；建议性发现永不失败；`--selftest` 内置自检；自动跳过代码围栏与行内代码。

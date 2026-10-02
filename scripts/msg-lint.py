@@ -3,12 +3,14 @@
 """
 msg-lint.py — Agent 运行时消息（A2A / 工具调用 / 事件）的确定性契约检查。
 
-对应 references/runtime-message-rules.md 中可机械判定的 C 类规则。
+对应 references/runtime-message-rules.md 中可机械判定的 C 类规则；
+协议字段映射见 references/protocol-mapping.md（--profile 将其固化为可执行检查）。
 退出码契约与 spec-lint.py 一致：硬性违规超 --baseline 时 exit 1；建议性发现永不失败。
 情态保护继承 R-A1：推测词本身不违规，未字段化才违规（C-5）。
 
 用法：
     python3 msg-lint.py MSG.json [MSG.json ...]
+    python3 msg-lint.py --profile a2a|mcp-request|mcp-result MSG.json
     cat msg.json | python3 msg-lint.py -
     python3 msg-lint.py --json msgs/
     python3 msg-lint.py --baseline 3 --disable c10-time-relative MSG.json
@@ -21,7 +23,7 @@ import os
 import re
 import sys
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 INTENT_ENUM = ("delegate", "query", "respond", "report", "clarify", "cancel")
 REQUIRED_ENVELOPE = ("message_id", "sender", "recipient",
@@ -39,6 +41,22 @@ HEDGES_EN = ["maybe", "perhaps", "possibly", "probably"]
 
 PAYLOAD_LIMIT = 2000      # C-11：超过此字符数的 payload 应外置为 artifact
 LONG_FIELD_LIMIT = 500    # 单字段超长：提示外置并按 A 类 prose 规则检查
+
+PROFILES = ("independent", "a2a", "mcp-request", "mcp-result")
+
+# MCP method → C-2 intent 映射（notifications/ 前缀统一映射为 report）
+MCP_METHOD_INTENT = {
+    "tools/call": "delegate",
+    "tools/list": "query",
+    "resources/read": "query",
+    "resources/list": "query",
+    "prompts/get": "query",
+    "prompts/list": "query",
+    "sampling/createMessage": "query",
+    "elicitation/request": "clarify",
+    "ping": "query",
+    "initialize": "query",
+}
 
 HARD = "HARD"
 ADVISORY = "ADVISORY"
@@ -76,9 +94,72 @@ def hit_word(text, word):
     return word in text
 
 
-def scan_message(msg, filename, disabled):
+def canonicalize(msg, profile):
+    """按协议 profile 推导 C 类中立信封。
+
+    返回 (canon, skip_fields)。推导不出的字段从 canon 省略（缺失检查报告）；
+    skip_fields 中的字段在该 profile 下豁免缺失检查。映射表见
+    references/protocol-mapping.md 第四节。
+    """
+    if profile == "independent" or not isinstance(msg, dict):
+        return msg, []
+
+    if profile == "a2a":
+        meta = msg.get("metadata") or {}
+        canon = dict(msg)
+        canon["message_id"] = msg.get("messageId")
+        canon["sender"] = msg.get("role")
+        canon["timestamp"] = msg.get("timestamp") or meta.get("clarify.timestamp")
+        canon["correlation_id"] = msg.get("contextId") or msg.get("taskId")
+        canon["intent"] = meta.get("clarify.intent")
+        canon["confidence"] = meta.get("clarify.confidence")
+        skip = ["recipient"]  # A2A 由传输层寻址，信封内无 recipient
+
+    elif profile == "mcp-request":
+        meta = (msg.get("params") or {}).get("_meta") or {}
+        method = msg.get("method", "")
+        intent = "report" if method.startswith("notifications/") \
+            else MCP_METHOD_INTENT.get(method)
+        canon = {
+            "message_id": msg.get("id"),
+            "sender": "client",
+            "recipient": method.split("/")[0] or None,
+            "timestamp": meta.get("clarify.timestamp"),
+            "correlation_id": msg.get("id"),
+            "intent": intent,
+        }
+        skip = []
+
+    elif profile == "mcp-result":
+        canon = {
+            "message_id": msg.get("id"),
+            "correlation_id": msg.get("id"),
+            "intent": "respond",
+        }
+        err = msg.get("error")
+        if isinstance(err, dict):
+            data = err.get("data") or {}
+            canon["error"] = {
+                "error_code": err.get("code"),
+                "message": err.get("message"),
+                "retryable": data.get("clarify.retryable"),
+                "recovery_hint": data.get("clarify.recovery_hint"),
+            }
+        skip = ["sender", "recipient", "timestamp"]  # MCP 响应信封无这三字段
+
+    else:
+        return msg, []
+
+    for k, v in list(canon.items()):
+        if v is None:
+            del canon[k]
+    return canon, skip
+
+
+def scan_message(msg, filename, disabled, skip_fields=()):
     findings = []
     disabled = set(disabled)
+    skip = set(skip_fields)
 
     def add(path, rule, severity, message):
         if rule not in disabled:
@@ -90,7 +171,7 @@ def scan_message(msg, filename, disabled):
 
     # --- C-1 信封契约 ---
     for f in REQUIRED_ENVELOPE:
-        if f not in msg:
+        if f not in msg and f not in skip:
             add("$", "c1-envelope", HARD, f"信封缺字段 {f} / missing envelope field: {f}")
     ts = msg.get("timestamp")
     if isinstance(ts, str) and not RFC3339_UTC.match(ts):
@@ -107,9 +188,9 @@ def scan_message(msg, filename, disabled):
     err = msg.get("error")
     if isinstance(err, dict):
         for f in ERROR_REQUIRED:
-            if f not in err:
+            if f not in err or err[f] is None:
                 add("$.error", "c6-error-shape", HARD,
-                    f"error 缺字段 {f}（C-6 四字段）/ error object missing: {f}")
+                    f"error 缺字段 {f}（C-6 四字段，null 视为缺失）/ error object missing or null: {f}")
 
     # --- 文本字段扫描：C-10 相对时间、C-5 情态字段化、长文本建议 ---
     hedged = False
@@ -145,6 +226,11 @@ def scan_message(msg, filename, disabled):
                 f"payload {size} 字符（上限 {PAYLOAD_LIMIT}）：外置为 artifact 并传 artifact_ref / payload too large; use an artifact reference")
 
     return findings
+
+
+def profile_findings(msg, profile):
+    canon, skip = canonicalize(msg, profile)
+    return scan_message(canon, "<profile>", set(), skip)
 
 
 def selftest():
@@ -184,6 +270,45 @@ def selftest():
             print(f"       期望命中但未命中: {sorted(missing)}")
         if unexpected:
             print(f"       不应命中却命中: {sorted(unexpected)}")
+
+    # --- profile 映射自检 ---
+    a2a_ok = {
+        "messageId": "msg-1", "role": "ROLE_AGENT",
+        "contextId": "ctx-1", "taskId": "task-1",
+        "parts": [{"text": "重构 parser 模块。"}],
+        "metadata": {"clarify.intent": "delegate",
+                     "clarify.timestamp": "2026-10-02T08:00:00Z",
+                     "clarify.confidence": "confirmed"},
+    }
+    mcp_req_ok = {
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "get_weather", "arguments": {"location": "NY"},
+                   "_meta": {"clarify.timestamp": "2026-10-02T08:00:00Z"}},
+    }
+    mcp_res_ok = {"jsonrpc": "2.0", "id": 2,
+                  "result": {"content": [{"type": "text", "text": "完成"}]}}
+    profile_cases = [
+        # (描述, 消息, profile, 必须命中的硬性规则, 不得命中的硬性规则)
+        ("a2a 合规", a2a_ok, "a2a", set(), set()),
+        ("a2a 缺 contextId 与 taskId",
+         {k: v for k, v in a2a_ok.items() if k not in ("contextId", "taskId")},
+         "a2a", {"c1-envelope"}, set()),
+        ("mcp-request 合规", mcp_req_ok, "mcp-request", set(), set()),
+        ("mcp-request 未知 method",
+         dict(mcp_req_ok, method="foo/bar"), "mcp-request", {"c1-envelope"}, set()),
+        ("mcp-request tools/call 推导 intent=delegate",
+         mcp_req_ok, "mcp-request", set(), {"c2-intent-enum"}),
+        ("mcp-result 合规", mcp_res_ok, "mcp-result", set(), set()),
+        ("mcp-result error 缺增强字段",
+         {"jsonrpc": "2.0", "id": 3, "error": {"code": -32602, "message": "未知工具"}},
+         "mcp-result", {"c6-error-shape"}, set()),
+    ]
+    for desc, obj, profile, must_hit, must_miss in profile_cases:
+        hard_rules = {f.rule for f in profile_findings(obj, profile) if f.severity == HARD}
+        ok = must_hit <= hard_rules and not (hard_rules & must_miss)
+        failed += 0 if ok else 1
+        print(f"[{'PASS' if ok else 'FAIL'}] {desc} 硬性={sorted(hard_rules) or '无'}")
+
     # 建议性永不失败：满建议性消息硬性数必须为 0
     advisory_only = {k: v for k, v in base.items()
                      if k not in ("ack_required", "timeout_seconds", "schema_version")}
@@ -217,6 +342,8 @@ def iter_inputs(paths):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="msg-lint: 运行时消息契约 linter（C 类规则机械检查）")
     ap.add_argument("files", nargs="*", help="JSON 消息文件、目录，或 - 表示 stdin")
+    ap.add_argument("--profile", choices=PROFILES, default="independent",
+                    help="协议适配模式：independent/a2a/mcp-request/mcp-result")
     ap.add_argument("--json", action="store_true", help="结构化 JSON 输出")
     ap.add_argument("--baseline", type=int, default=0, help="允许的硬性违规数")
     ap.add_argument("--disable", default="", help="逗号分隔的禁用的规则名")
@@ -236,7 +363,11 @@ def main(argv=None):
         except json.JSONDecodeError as e:
             all_findings.append(Finding(filename, "$", "c0-parse", HARD, f"JSON 解析失败：{e}"))
             continue
-        all_findings.extend(scan_message(msg, filename, disabled))
+        canon, skip = canonicalize(msg, args.profile)
+        for f in scan_message(canon, filename, disabled, skip):
+            if args.profile != "independent":
+                f.path = f"[{args.profile}]{f.path}"
+            all_findings.append(f)
 
     hard = [f for f in all_findings if f.severity == HARD]
     advisory = [f for f in all_findings if f.severity == ADVISORY]
@@ -244,7 +375,7 @@ def main(argv=None):
 
     if args.json:
         print(json.dumps({
-            "tool": "msg-lint", "version": VERSION,
+            "tool": "msg-lint", "version": VERSION, "profile": args.profile,
             "summary": {"hard": len(hard), "advisory": len(advisory),
                         "baseline": args.baseline, "exit": exit_code},
             "findings": [f.to_dict() for f in all_findings],

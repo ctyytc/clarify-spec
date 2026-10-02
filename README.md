@@ -34,13 +34,14 @@ clarify-spec/
 │   ├── human-expression-rules.md   # A 类：人类表达规则全文（H-A1…H-A14, R-A1）
 │   ├── agent-artifacts-rules.md    # B 类：过程文件规则全文（H-B1…H-B18）
 │   ├── runtime-message-rules.md    # C 类：运行时消息规则全文（C-1…C-12）
+│   ├── protocol-mapping.md         # C 类字段与 A2A / MCP 的逐字段映射
 │   ├── standards-map.md            # 中英经典标准映射总表
 │   └── templates.md                # PLAN / HANDOFF / ADR / STATUS 最小模板
 ├── scripts/
 │   ├── spec-lint.py                # 散文与过程文件 linter（纯 stdlib）
-│   └── msg-lint.py                 # 运行时消息契约 linter（纯 stdlib）
+│   └── msg-lint.py                 # 运行时消息契约 linter（含 --profile 协议适配）
 ├── tests/
-│   └── fixtures/                   # CI 正负夹具（message-valid / message-invalid）
+│   └── fixtures/                   # CI 正负夹具（independent / a2a 两套）
 ├── .github/workflows/ci.yml        # 双 linter 自检 + 零违规门禁 + 负向测试
 └── examples/
     ├── before-after.md             # 中英对照改写示例
@@ -73,6 +74,7 @@ python3 scripts/spec-lint.py --selftest            # 内置自检
 # msg-lint：JSON 运行时消息
 python3 scripts/msg-lint.py msg.json               # 单条消息契约检查
 python3 scripts/msg-lint.py --json msgs/           # 目录批量 + CI 输出
+python3 scripts/msg-lint.py --profile a2a msg.json # A2A 协议适配（另有 mcp-request / mcp-result）
 python3 scripts/msg-lint.py --selftest             # 内置自检
 ```
 
